@@ -6,4 +6,6 @@ Pillow==10.4.0
 numpy==1.26.4
 opencv-python-headless==4.10.0.84
 thefuzz==0.19.0
+# python-Levenshtein is optional - speeds up fuzzy matching but may fail to build on Python 3.12+
+# If installation fails, you can skip this package - thefuzz works fine without it
 python-Levenshtein==0.21.1

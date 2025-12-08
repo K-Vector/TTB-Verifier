@@ -29,6 +29,7 @@ COPY requirements.txt ./
 
 # Install Python dependencies (use pip cache, install in order of size)
 # Install smaller packages first, then OpenCV (largest)
+# python-Levenshtein is optional - if it fails, thefuzz will work without it (just slower)
 RUN pip install --no-cache-dir \
     fastapi==0.115.0 \
     uvicorn[standard]==0.32.0 \
@@ -37,7 +38,7 @@ RUN pip install --no-cache-dir \
     Pillow==10.4.0 \
     numpy==1.26.4 \
     thefuzz==0.19.0 \
-    python-Levenshtein==0.21.1 \
+    && (pip install --no-cache-dir python-Levenshtein==0.21.1 || echo "python-Levenshtein failed, continuing without it") \
     && pip install --no-cache-dir opencv-python-headless==4.10.0.84
 
 # Copy package files for Node.js

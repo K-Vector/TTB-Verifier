@@ -153,6 +153,14 @@ The `test-images/` folder contains sample images for testing:
 - **Images ending with `_updated`:** OCR-friendly versions with corrected text
 - **Other images:** May contain incorrect information by design for testing edge cases
 
+### Installation Issues
+
+**python-Levenshtein build failure (Python 3.12+):**
+If you get build errors when installing `python-Levenshtein`, it's optional. The `thefuzz` library works fine without it, just a bit slower. You can install dependencies without it:
+```bash
+pip install fastapi==0.115.0 "uvicorn[standard]==0.32.0" python-multipart==0.0.12 pytesseract==0.3.10 Pillow==10.4.0 numpy==1.26.4 opencv-python-headless==4.10.0.84 thefuzz==0.19.0
+```
+
 ### Error Types Found During Testing
 
 Both **Type I errors** (false positives) and **Type II errors** (false negatives) have been observed:
@@ -241,7 +249,12 @@ cd AI-Alcohol-Label-Verification
 npm install
 
 # Install Python dependencies
+# Option 1: Using pip (if using venv or conda)
 pip install -r requirements.txt
+
+# Option 2: If python-Levenshtein fails to build (Python 3.12+), install without it
+# Thefuzz will work without it, just slower
+pip install fastapi==0.115.0 "uvicorn[standard]==0.32.0" python-multipart==0.0.12 pytesseract==0.3.10 Pillow==10.4.0 numpy==1.26.4 opencv-python-headless==4.10.0.84 thefuzz==0.19.0
 ```
 
 3. **Run the application**
@@ -249,7 +262,8 @@ pip install -r requirements.txt
 **Option A: Full stack (recommended)**
 ```bash
 # Terminal 1: Start backend
-uvicorn server.api:app --reload --port 8000
+python -m uvicorn server.api:app --reload --port 8000
+# or just: uvicorn server.api:app --reload --port 8000
 
 # Terminal 2: Start frontend dev server
 npm run dev
@@ -263,7 +277,8 @@ Frontend will be available at `http://localhost:5173` and will proxy API request
 npm run build
 
 # Start backend (serves built frontend)
-uvicorn server.api:app --reload --port 8000
+python -m uvicorn server.api:app --reload --port 8000
+# or just: uvicorn server.api:app --reload --port 8000
 ```
 
 Application will be available at `http://localhost:8000`.

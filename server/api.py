@@ -129,59 +129,6 @@ def token_overlap_ratio(text1: str, text2: str) -> float:
     
     return len(intersection) / len(union)
 
-def check_long_warning_text(ocr_text: str, expected_text: str, key_phrases: List[str] = None) -> bool:
-    """
-    Check if the long warning text is present in OCR output. Uses multiple approaches
-    to handle OCR errors - key phrases, fuzzy matching, and token overlap.
-    """
-    norm_ocr = normalize_text(ocr_text)
-    norm_expected = normalize_text(expected_text)
-    ocr_lower = ocr_text.lower()
-    
-    # First try matching key phrases - these are usually the most reliable
-    if key_phrases:
-        phrases_found = 0
-        for phrase in key_phrases:
-            if fuzzy_match(ocr_lower, phrase, threshold=75):
-                phrases_found += 1
-        
-        # If we find most of the key phrases, we're probably good
-        if phrases_found >= len(key_phrases) * 0.6:
-            logger.debug(f"Key phrases match: {phrases_found}/{len(key_phrases)} phrases found")
-            return True
-    
-    # Try token_sort_ratio - handles word order changes better than simple overlap
-    score = fuzz.token_sort_ratio(norm_ocr, norm_expected)
-    if score >= 70:
-        logger.debug(f"Token sort ratio match: {score}%")
-        return True
-    
-    # Break it into chunks and see if we can match significant portions
-    # This helps when OCR misses a few words but gets most of them
-    expected_words = norm_expected.split()
-    chunk_size = min(8, len(expected_words))
-    chunks_matched = 0
-    total_chunks = max(1, (len(expected_words) + chunk_size - 1) // chunk_size)
-    
-    for i in range(0, len(expected_words), chunk_size):
-        chunk = " ".join(expected_words[i:i + chunk_size])
-        if fuzzy_match(ocr_lower, chunk, threshold=75):
-            chunks_matched += 1
-    
-    if chunks_matched >= total_chunks * 0.5:
-        logger.debug(f"Sliding window match: {chunks_matched}/{total_chunks} chunks matched")
-        return True
-    
-    # Last resort: token overlap with a more lenient threshold
-    # The old 65% was too strict for OCR errors
-    overlap = token_overlap_ratio(ocr_text, expected_text)
-    if overlap >= 0.50:
-        logger.debug(f"Token overlap match: {overlap:.2%}")
-        return True
-    
-    logger.debug(f"No match found. Token sort ratio: {score}%, Token overlap: {overlap:.2%}")
-    return False
-
 def check_government_warning(text: str) -> Dict[str, Any]:
     """Validate government warning label compliance"""
     norm_text = normalize_text(text)
@@ -212,15 +159,15 @@ def check_government_warning(text: str) -> Dict[str, Any]:
         surgeon_general_pattern = r"surgeon\s*general"
         has_surgeon_general = bool(re.search(surgeon_general_pattern, norm_text))
     
-    # pregnancy warning - the old token overlap was too strict, use the new function
+    # pregnancy warning - using token overlap to handle OCR errors
     pregnancy_text = "according to the surgeon general women should not drink alcoholic beverages during pregnancy because of the risk of birth defects"
-    pregnancy_key_phrases = ["pregnancy", "birth defects", "women should not drink", "surgeon general"]
-    has_pregnancy_warning = check_long_warning_text(original_text, pregnancy_text, key_phrases=pregnancy_key_phrases)
+    pregnancy_overlap = token_overlap_ratio(original_text, pregnancy_text)
+    has_pregnancy_warning = pregnancy_overlap >= TOKEN_OVERLAP_THRESHOLD
     
     # driving/machinery warning
     driving_text = "consumption of alcoholic beverages impairs your ability to drive a car or operate machinery and may cause health problems"
-    driving_key_phrases = ["drive a car", "operate machinery", "impairs your ability", "alcoholic beverages"]
-    has_driving_warning = check_long_warning_text(original_text, driving_text, key_phrases=driving_key_phrases)
+    driving_overlap = token_overlap_ratio(original_text, driving_text)
+    has_driving_warning = driving_overlap >= TOKEN_OVERLAP_THRESHOLD
     
     is_compliant = has_warning_label and has_surgeon_general and has_pregnancy_warning and has_driving_warning
     
