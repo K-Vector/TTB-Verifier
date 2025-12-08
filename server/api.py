@@ -11,6 +11,24 @@ import os
 import cv2
 import numpy as np
 from thefuzz import fuzz
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
+# Configuration constants
+FUZZY_MATCH_THRESHOLD = 85
+TOKEN_OVERLAP_THRESHOLD = 0.65
+FUZZY_MATCH_SHORT_STRING_LENGTH = 20
+OCR_MIN_TEXT_LENGTH = 150
+OCR_MIN_WORD_COUNT = 15
+OCR_QUALITY_SCORE_THRESHOLD = 300
+EXTRACTION_CONTEXT_WINDOW = 20
+CANNY_EDGE_LOW = 50
+CANNY_EDGE_HIGH = 150
+HOUGH_LINES_LIMIT = 20
+DESKEW_ANGLE_THRESHOLD = 0.5
 
 app = FastAPI()
 
@@ -45,7 +63,7 @@ def normalize_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text)  # collapse whitespace
     return text.strip()
 
-def fuzzy_match(source: str, target: str, threshold: int = 85) -> bool:
+def fuzzy_match(source: str, target: str, threshold: int = FUZZY_MATCH_THRESHOLD) -> bool:
     """Fuzzy match using Levenshtein distance - handles OCR errors"""
     if not target:
         return True
@@ -76,7 +94,7 @@ def fuzzy_match(source: str, target: str, threshold: int = 85) -> bool:
                 return True
     
     # fallback for short strings
-    if len(target_norm) <= 20:
+    if len(target_norm) <= FUZZY_MATCH_SHORT_STRING_LENGTH:
         score = fuzz.partial_ratio(target_norm, source_norm)
         if score >= threshold:
             return True
@@ -120,7 +138,7 @@ def check_government_warning(text: str) -> Dict[str, Any]:
     warning_phrases = ["government warning", "government warn ing", "govern ment warning"]
     has_warning_label = False
     for phrase in warning_phrases:
-        if fuzzy_match(original_text, phrase, threshold=85):
+        if fuzzy_match(original_text, phrase, threshold=FUZZY_MATCH_THRESHOLD):
             has_warning_label = True
             break
     
@@ -133,7 +151,7 @@ def check_government_warning(text: str) -> Dict[str, Any]:
     surgeon_phrases = ["surgeon general", "surgeon gen eral"]
     has_surgeon_general = False
     for phrase in surgeon_phrases:
-        if fuzzy_match(original_text, phrase, threshold=85):
+        if fuzzy_match(original_text, phrase, threshold=FUZZY_MATCH_THRESHOLD):
             has_surgeon_general = True
             break
     
@@ -144,12 +162,12 @@ def check_government_warning(text: str) -> Dict[str, Any]:
     # pregnancy warning - using token overlap to handle OCR errors
     pregnancy_text = "according to the surgeon general women should not drink alcoholic beverages during pregnancy because of the risk of birth defects"
     pregnancy_overlap = token_overlap_ratio(original_text, pregnancy_text)
-    has_pregnancy_warning = pregnancy_overlap >= 0.65
+    has_pregnancy_warning = pregnancy_overlap >= TOKEN_OVERLAP_THRESHOLD
     
     # driving/machinery warning
     driving_text = "consumption of alcoholic beverages impairs your ability to drive a car or operate machinery and may cause health problems"
     driving_overlap = token_overlap_ratio(original_text, driving_text)
-    has_driving_warning = driving_overlap >= 0.65
+    has_driving_warning = driving_overlap >= TOKEN_OVERLAP_THRESHOLD
     
     is_compliant = has_warning_label and has_surgeon_general and has_pregnancy_warning and has_driving_warning
     
@@ -199,7 +217,7 @@ def extract_product_class(ocr_text: str, brand_name: Optional[str] = None) -> Op
         keyword_norm = normalize_text(keyword)
         pos = search_text.find(keyword_norm)
         if pos != -1:
-            words = search_text[max(0, pos-20):pos+len(keyword_norm)+20].split()
+            words = search_text[max(0, pos-EXTRACTION_CONTEXT_WINDOW):pos+len(keyword_norm)+EXTRACTION_CONTEXT_WINDOW].split()
             keyword_idx = -1
             for i, word in enumerate(words):
                 if keyword_norm in normalize_text(word):
@@ -225,8 +243,8 @@ def extract_alcohol_content(ocr_text: str) -> Optional[str]:
     for pattern in patterns:
         match = re.search(pattern, ocr_text, re.IGNORECASE)
         if match:
-            start = max(0, match.start() - 30)
-            end = min(len(ocr_text), match.end() + 30)
+            start = max(0, match.start() - EXTRACTION_CONTEXT_WINDOW)
+            end = min(len(ocr_text), match.end() + EXTRACTION_CONTEXT_WINDOW)
             context = ocr_text[start:end]
             words = context.split()
             for i, word in enumerate(words):
@@ -249,8 +267,8 @@ def extract_net_contents(ocr_text: str) -> Optional[str]:
     for pattern in volume_patterns:
         match = re.search(pattern, ocr_text, re.IGNORECASE)
         if match:
-            start = max(0, match.start() - 20)
-            end = min(len(ocr_text), match.end() + 20)
+            start = max(0, match.start() - EXTRACTION_CONTEXT_WINDOW)
+            end = min(len(ocr_text), match.end() + EXTRACTION_CONTEXT_WINDOW)
             context = ocr_text[start:end]
             words = context.split()
             for i, word in enumerate(words):
@@ -294,7 +312,8 @@ def validate_alcohol_content(ocr_text: str, form_value: str, product_type: str) 
         int_val = int(val_float)
         if str(int_val) in norm_text and "%" in ocr_text:
             return True
-    except:
+    except ValueError:
+        # Invalid form value, skip fuzzy matching
         pass
         
     return False
@@ -349,11 +368,11 @@ def preprocess_image_for_ocr(image: Image.Image) -> Image.Image:
         
         if inverted_white > normal_white * 1.2:
             img_gray = Image.fromarray(img_binary_inv, mode='L')
-            img_gray = Image.fromarray(img_binary_inv, mode='L')
         else:
             img_gray = Image.fromarray(img_binary, mode='L')
     except Exception as e:
         # Fallback: simple threshold
+        logger.warning(f"Advanced binarization failed, using simple threshold: {e}")
         threshold = 128
         img_gray = img_gray.point(lambda x: 255 if x > threshold else 0, mode='1').convert('L')
     
@@ -369,7 +388,7 @@ def deskew_image(img_gray: np.ndarray) -> np.ndarray:
     """
     try:
         # Detect edges using Canny
-        edges = cv2.Canny(img_gray, 50, 150, apertureSize=3)
+        edges = cv2.Canny(img_gray, CANNY_EDGE_LOW, CANNY_EDGE_HIGH, apertureSize=3)
         
         # Use HoughLines to detect text lines
         lines = cv2.HoughLines(edges, 1, np.pi / 180, 200)
@@ -377,21 +396,21 @@ def deskew_image(img_gray: np.ndarray) -> np.ndarray:
         if lines is not None and len(lines) > 0:
             # Calculate average angle
             angles = []
-            for rho, theta in lines[:20]:  # Use first 20 lines
+            for rho, theta in lines[:HOUGH_LINES_LIMIT]:
                 angle = (theta * 180 / np.pi) - 90
                 if -45 < angle < 45:  # Only consider reasonable angles
                     angles.append(angle)
             
             if angles:
                 avg_angle = np.median(angles)
-                if abs(avg_angle) > 0.5:  # Only correct if angle is significant
+                if abs(avg_angle) > DESKEW_ANGLE_THRESHOLD:
                     # Rotate image to correct skew
                     (h, w) = img_gray.shape[:2]
                     center = (w // 2, h // 2)
                     M = cv2.getRotationMatrix2D(center, avg_angle, 1.0)
                     img_gray = cv2.warpAffine(img_gray, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"Deskew operation failed: {e}")
     
     return img_gray
 
@@ -609,12 +628,17 @@ def perform_ocr_with_retry(image: Image.Image) -> str:
                         # Early exit if we find a very good result
                         tesseract_score = score_result(text)
                         word_count = len(text.split())
-                        if len(text) > 150 and word_count > 15 and tesseract_score > 300:
+                        if len(text) > OCR_MIN_TEXT_LENGTH and word_count > OCR_MIN_WORD_COUNT and tesseract_score > OCR_QUALITY_SCORE_THRESHOLD:
                             high_quality_found = True
                             return text
-                except Exception:
+                except pytesseract.TesseractError as e:
+                    logger.debug(f"Tesseract error with PSM {psm_mode}: {e}")
                     continue
-        except Exception:
+                except Exception as e:
+                    logger.warning(f"Unexpected error during OCR (PSM {psm_mode}): {e}")
+                    continue
+        except Exception as e:
+            logger.warning(f"Preprocessing error for variant {variant_name}: {e}")
             continue
     
     # Only try Variant 1 if high quality result not found from Variant 2 and 3
@@ -638,11 +662,16 @@ def perform_ocr_with_retry(image: Image.Image) -> str:
                         # Early exit if we find a very good result
                         tesseract_score = score_result(text)
                         word_count = len(text.split())
-                        if len(text) > 150 and word_count > 15 and tesseract_score > 300:
+                        if len(text) > OCR_MIN_TEXT_LENGTH and word_count > OCR_MIN_WORD_COUNT and tesseract_score > OCR_QUALITY_SCORE_THRESHOLD:
                             return text
-                except Exception:
+                except pytesseract.TesseractError as e:
+                    logger.debug(f"Tesseract error with PSM {psm_mode}: {e}")
                     continue
-        except Exception:
+                except Exception as e:
+                    logger.warning(f"Unexpected error during OCR (PSM {psm_mode}): {e}")
+                    continue
+        except Exception as e:
+            logger.warning(f"Preprocessing error for variant {variant_name}: {e}")
             pass
     
     if not all_results:
@@ -682,7 +711,8 @@ def find_text_coordinates(image: Image.Image, search_text: str) -> List[Dict[str
                     "text": data['text'][i]
                 })
         return matches
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Error finding text coordinates: {e}")
         return []
 
 @app.post("/api/verify")
@@ -698,10 +728,11 @@ async def verify_label(
         contents = await image.read()
         img = Image.open(io.BytesIO(contents))
         
-        print("=" * 80)
-        print("STARTING OCR PROCESSING")
-        print("=" * 80)
-        print(f"Original Image: {img.width}x{img.height}, Mode: {img.mode}")
+        logger.info("Starting OCR processing", extra={
+            "image_width": img.width,
+            "image_height": img.height,
+            "image_mode": img.mode
+        })
         
         # run OCR
         ocr_text = perform_ocr_with_retry(img)
@@ -713,13 +744,13 @@ async def verify_label(
         net_contents = net_contents.strip() if net_contents else ""
         
         # match fields using fuzzy matching (handles OCR errors)
-        brand_match = fuzzy_match(ocr_text, brand_name, threshold=85) if brand_name else True
-        type_match = fuzzy_match(ocr_text, product_type, threshold=85) if product_type else True
+        brand_match = fuzzy_match(ocr_text, brand_name, threshold=FUZZY_MATCH_THRESHOLD) if brand_name else True
+        type_match = fuzzy_match(ocr_text, product_type, threshold=FUZZY_MATCH_THRESHOLD) if product_type else True
         alc_match = validate_alcohol_content(ocr_text, alcohol_content, product_type)
         
         net_match = True
         if net_contents:
-            net_match = fuzzy_match(ocr_text, net_contents, threshold=85)
+            net_match = fuzzy_match(ocr_text, net_contents, threshold=FUZZY_MATCH_THRESHOLD)
             
         # check government warning compliance
         compliance = check_government_warning(ocr_text)
@@ -749,7 +780,8 @@ async def verify_label(
         })
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Verification error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error during verification")
 
 def get_index_html():
     """Serve the React app"""

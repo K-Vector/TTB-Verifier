@@ -7,7 +7,7 @@ A web application for verifying alcohol label compliance with TTB regulations us
 - **Clean, minimalist UI** - Simple two-panel layout for easy verification
 - **Advanced OCR** - Tesseract with multiple preprocessing strategies for accurate text extraction
 - **Fuzzy Matching** - Levenshtein distance matching handles OCR errors gracefully
-- **Government Warning Validation** - N-Gram token overlap (80%) validates mandatory warning text
+- **Government Warning Validation** - N-Gram token overlap (65%) validates mandatory warning text
 - **Real-time Processing** - Progress bar with percentage during OCR processing
 - **Manual Audit** - View both OCR text and form entries side-by-side for verification
 - **Automatic Form Clearing** - Form resets after successful verification for batch processing
@@ -24,19 +24,23 @@ A web application for verifying alcohol label compliance with TTB regulations us
 - **Cursor** - Primary IDE for programming
 - **VS Code** - Secondary editor for development
 - **ChatGPT** - Research assistance and image generation for test data
+- **qwen3-coder:30b** - Local model on Ollama for support and verification 
 
 ### Key Files
 
 - `server/api.py` - Backend with OCR and verification logic
 - `client/src/pages/VerificationPage.tsx` - Main frontend component
 - `client/src/lib/api.ts` - API client
+- `client/src/constants.ts` - Application-wide constants (progress values, UI delays)
 
 ### Code Structure
 
 - **OCR Processing:** `perform_ocr_with_retry()` in `server/api.py`
-- **Fuzzy Matching:** `fuzzy_match()` using TheFuzz library
+- **Fuzzy Matching:** `fuzzy_match()` using TheFuzz library (85% threshold)
 - **Text Normalization:** `normalize_text()` with regex
-- **Government Warning:** `check_government_warning()` with N-Gram token overlap
+- **Government Warning:** `check_government_warning()` with N-Gram token overlap (65% threshold)
+- **Configuration:** Constants defined at module level for easy tuning
+- **Logging:** Structured logging with Python `logging` module
 
 ## Project Structure
 
@@ -45,13 +49,16 @@ A web application for verifying alcohol label compliance with TTB regulations us
 │   ├── src/
 │   │   ├── components/ # UI components
 │   │   ├── lib/        # Utilities and API client
-│   │   └── pages/      # Page components
+│   │   ├── pages/      # Page components
+│   │   └── constants.ts # Application constants
 ├── server/
-│   └── api.py         # FastAPI backend
+│   └── api.py         # FastAPI backend (with constants and logging)
 ├── test-images/       # Sample test images
 ├── Dockerfile         # Docker configuration
 ├── requirements.txt   # Python dependencies
-└── package.json       # Node.js dependencies
+├── package.json       # Node.js dependencies
+├── CODE_QUALITY_REVIEW.md      # Comprehensive code quality analysis
+└── CODE_QUALITY_IMPROVEMENTS.md # Summary of improvements
 ```
 ## How It Works
 
@@ -81,9 +88,10 @@ Uses **Levenshtein distance** (TheFuzz library) with 85% similarity threshold:
 
 Validates mandatory warning label using:
 
-- **Header Matching:** Levenshtein distance (85%) for "GOVERNMENT WARNING" and "SURGEON GENERAL"
-- **Content Validation:** N-Gram token overlap (80%) for warning text body
-- Allows ~20% error rate in OCR text while maintaining accuracy
+- **Header Matching:** Levenshtein distance (85% threshold) for "GOVERNMENT WARNING" and "SURGEON GENERAL"
+- **Content Validation:** N-Gram token overlap (65% threshold) for warning text body
+- Allows ~35% error rate in OCR text while maintaining accuracy
+- Thresholds are configurable via constants in `server/api.py`
 
 ### 4. Field Extraction
 
@@ -119,6 +127,22 @@ Tesseract with advanced preprocessing provides good results while keeping the ap
 - **Processing Time:** ~1 minute per image
 - **Memory Usage:** ~100-200MB (Tesseract only, no deep learning models)
 - **Accuracy:** Good for clear labels, handles common OCR errors with fuzzy matching
+- **Code Quality:** Production-ready with structured logging, proper error handling, and maintainable constants
+
+## Code Quality
+
+The codebase follows best practices:
+
+- **Constants:** All magic numbers extracted to named constants for easy configuration
+  - Fuzzy matching threshold: 85%
+  - Token overlap threshold: 65%
+  - OCR quality thresholds configurable
+- **Logging:** Structured logging with Python `logging` module (info, warning, error, debug levels)
+- **Error Handling:** Specific exception handling with proper logging
+- **Type Safety:** TypeScript for frontend, type hints for Python backend
+- **Documentation:** Comprehensive code review and improvement documentation
+
+See `CODE_QUALITY_REVIEW.md` and `CODE_QUALITY_IMPROVEMENTS.md` for detailed analysis.
 
 ## Testing & Known Issues
 
@@ -141,7 +165,7 @@ Both **Type I errors** (false positives) and **Type II errors** (false negatives
   - Can occur with poor OCR quality
   - May miss matches due to normalization differences
 
-**Mitigation:** The system uses 85% threshold for fuzzy matching and 80% token overlap for warnings to balance accuracy and error tolerance. Manual review of OCR text is recommended for critical verifications.
+**Mitigation:** The system uses 85% threshold for fuzzy matching and 65% token overlap for warnings to balance accuracy and error tolerance. These thresholds are configurable via constants in `server/api.py`. Manual review of OCR text is recommended for critical verifications.
 
 ## Future Enhancements Ideas
 

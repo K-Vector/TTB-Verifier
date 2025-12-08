@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { verifyLabel, type VerificationResponse } from "@/lib/api";
+import { PROGRESS, PROGRESS_UPDATE, UI } from "@/constants";
 
 const formSchema = z.object({
   brand_name: z.string().min(1, "Brand name is required"),
@@ -70,7 +71,7 @@ export default function VerificationPage() {
     };
 
     window.addEventListener("resize", updateScale);
-    setTimeout(updateScale, 100);
+    setTimeout(updateScale, UI.SCALE_UPDATE_DELAY_MS);
     
     return () => window.removeEventListener("resize", updateScale);
   }, [verificationResult, imagePreview]);
@@ -145,13 +146,13 @@ export default function VerificationPage() {
     // Progress increases gradually, with faster updates at the end
     let currentProgress = 0;
     progressIntervalRef.current = setInterval(() => {
-      if (currentProgress < 90) {
+      if (currentProgress < PROGRESS.MAX_SIMULATED) {
         // Slow progress at start (OCR takes time)
-        currentProgress += Math.random() * 3 + 1;
-        if (currentProgress > 90) currentProgress = 90;
-        setProgress(Math.min(currentProgress, 90));
+        currentProgress += Math.random() * (PROGRESS_UPDATE.INCREMENT_MAX - PROGRESS_UPDATE.INCREMENT_MIN) + PROGRESS_UPDATE.INCREMENT_MIN;
+        if (currentProgress > PROGRESS.MAX_SIMULATED) currentProgress = PROGRESS.MAX_SIMULATED;
+        setProgress(Math.min(currentProgress, PROGRESS.MAX_SIMULATED));
       }
-    }, 200);
+    }, PROGRESS_UPDATE.INTERVAL_MS);
     
     try {
       // Get the file from the input directly if form data doesn't have it
@@ -191,14 +192,14 @@ export default function VerificationPage() {
       }
       formData.append("image", imageFile);
 
-      setProgress(95); // Almost done
+      setProgress(PROGRESS.BEFORE_COMPLETE); // Almost done
       const result = await verifyLabel(formData);
       
       // Clear progress interval
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
       }
-      setProgress(100);
+      setProgress(PROGRESS.COMPLETE);
       
       setVerificationResult(result);
       
@@ -208,7 +209,7 @@ export default function VerificationPage() {
           const naturalWidth = result.image_dimensions.width;
           setScale(renderedWidth / naturalWidth);
         }
-      }, 100);
+      }, UI.SCALE_UPDATE_DELAY_MS);
       
       // Clear the form after successful processing (but keep formEntries for display)
       resetForm();
@@ -224,7 +225,7 @@ export default function VerificationPage() {
       // Reset progress after a short delay to show 100%
       setTimeout(() => {
         setProgress(0);
-      }, 500);
+      }, PROGRESS_UPDATE.RESET_DELAY_MS);
     }
   };
 
