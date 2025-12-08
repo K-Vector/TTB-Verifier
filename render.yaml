@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: alcohol-label-verifier
+    env: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    envVars:
+      - key: PORT
+        value: 8000
+    healthCheckPath: /
+
