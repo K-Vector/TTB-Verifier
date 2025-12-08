@@ -9,8 +9,8 @@ export default defineConfig({
   build: {
     outDir: "../dist",
     emptyOutDir: true,
-    minify: "esbuild", // Faster than terser
-    sourcemap: false, // Disable sourcemaps in production for faster builds
+    minify: "esbuild", // esbuild is faster
+    sourcemap: false, // skip sourcemaps for smaller builds
     chunkSizeWarningLimit: 1000,
   },
   resolve: {

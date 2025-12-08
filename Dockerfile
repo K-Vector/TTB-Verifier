@@ -1,7 +1,6 @@
-# Use Python base image
 FROM python:3.11-slim
 
-# Install system dependencies in one layer for better caching
+# Install system deps - tesseract, node, etc.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     libtesseract-dev \
@@ -18,18 +17,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Set working directory
 WORKDIR /app
 
-# Upgrade pip (use cache for faster builds)
+# Upgrade pip
 RUN pip install --upgrade pip wheel setuptools
 
-# Copy Python requirements first (better layer caching)
+# Copy requirements first for better caching
 COPY requirements.txt ./
 
-# Install Python dependencies (use pip cache, install in order of size)
-# Install smaller packages first, then OpenCV (largest)
-# python-Levenshtein is optional - if it fails, thefuzz will work without it (just slower)
+# Install Python deps - python-Levenshtein is optional, skip if it fails
 RUN pip install --no-cache-dir \
     fastapi==0.115.0 \
     uvicorn[standard]==0.32.0 \
@@ -41,20 +37,15 @@ RUN pip install --no-cache-dir \
     && (pip install --no-cache-dir python-Levenshtein==0.21.1 || echo "python-Levenshtein failed, continuing without it") \
     && pip install --no-cache-dir opencv-python-headless==4.10.0.84
 
-# Copy package files for Node.js
+# Install Node deps
 COPY package.json package-lock.json* ./
-
-# Install Node.js dependencies
-# Use npm install (more forgiving than npm ci if lock file has issues)
 RUN npm install --prefer-offline --no-audit
 
-# Copy application code
+# Copy everything and build frontend
 COPY . .
-
-# Build frontend (this creates the dist/ directory)
 RUN npm run build
 
-# Quick verification (combined into one RUN)
+# Make sure everything built correctly
 RUN test -f server/api.py && test -d dist && test -f dist/index.html || exit 1
 
 # Expose port
@@ -64,8 +55,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:${PORT:-8000}/ || exit 1
 
-# CRITICAL: Start FastAPI server using uvicorn
-# This MUST be the only command that runs
-# DO NOT use start.sh or any other script
-# Render will use this CMD, not start.sh
-CMD ["/bin/sh", "-c", "echo '=== Starting TTB Verifier with FastAPI ===' && echo 'PORT: '${PORT:-8000} && echo 'Working dir: '$(pwd) && echo 'Python: '$(python --version) && echo 'Node: '$(node --version) && uvicorn server.api:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Start the server - Render uses this CMD
+CMD ["/bin/sh", "-c", "uvicorn server.api:app --host 0.0.0.0 --port ${PORT:-8000}"]

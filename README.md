@@ -124,7 +124,7 @@ Tesseract with advanced preprocessing provides good results while keeping the ap
 
 ## Performance
 
-- **Processing Time:** ~1 minute per image
+- **Processing Time:** ~1 minute per image on Render (Free tier) and 1-2 seconds on local (M3 Ultra, 96 GB unifed memory)
 - **Memory Usage:** ~100-200MB (Tesseract only, no deep learning models)
 - **Accuracy:** Good for clear labels, handles common OCR errors with fuzzy matching
 - **Code Quality:** Production-ready with structured logging, proper error handling, and maintainable constants
