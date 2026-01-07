@@ -1,0 +1,618 @@
+================================================================================
+API.PY - PSEUDOCODE WALKTHROUGH
+================================================================================
+
+This document explains the logic flow of server/api.py in pseudocode format.
+
+================================================================================
+1. SETUP & CONFIGURATION (Lines 1-55)
+================================================================================
+
+IMPORT all necessary libraries:
+  - FastAPI (web framework)
+  - PIL/Image (image processing)
+  - OpenCV (cv2) (advanced image processing)
+  - Tesseract (pytesseract) (OCR)
+  - TheFuzz (fuzzy string matching)
+  - Standard libraries (re, io, os, logging, etc.)
+
+SETUP logging system
+
+DEFINE configuration constants:
+  - FUZZY_MATCH_THRESHOLD = 85% (how similar text needs to be to match)
+  - TOKEN_OVERLAP_THRESHOLD = 65% (for warning text matching)
+  - OCR_MIN_TEXT_LENGTH = 150 (minimum characters for good OCR)
+  - OCR_MIN_WORD_COUNT = 15 (minimum words for good OCR)
+  - OCR_QUALITY_SCORE_THRESHOLD = 300 (quality threshold)
+  - Image processing parameters (Canny edges, Hough lines, etc.)
+
+CREATE FastAPI application instance
+
+CONFIGURE CORS (Cross-Origin Resource Sharing):
+  - Allow all origins (for development)
+  - Allow all methods and headers
+
+SETUP static file serving:
+  - If dist/assets exists, serve it for production builds
+
+
+================================================================================
+2. TEXT NORMALIZATION (Lines 57-64)
+================================================================================
+
+FUNCTION normalize_text(text):
+  PURPOSE: Clean up text for comparison (handles OCR inconsistencies)
+  
+  IF text is empty:
+    RETURN empty string
+  
+  CONVERT text to lowercase
+  REMOVE all punctuation and special characters (keep only letters, numbers, spaces)
+  COLLAPSE multiple spaces/newlines into single space
+  TRIM leading/trailing whitespace
+  
+  RETURN cleaned text
+  
+  EXAMPLE:
+    Input:  "Government  Warning!!!"
+    Output: "government warning"
+
+
+================================================================================
+3. FUZZY MATCHING (Lines 66-102)
+================================================================================
+
+FUNCTION fuzzy_match(source_text, target_text, threshold=85%):
+  PURPOSE: Check if target text appears in source text, handling OCR errors
+  
+  IF target is empty:
+    RETURN true (nothing to match, so it passes)
+  
+  IF source is empty:
+    RETURN false (nothing to match against)
+  
+  NORMALIZE both texts (lowercase, remove punctuation, etc.)
+  
+  STRATEGY 1: Quick exact substring match
+    IF normalized target found in normalized source:
+      RETURN true (fastest check)
+  
+  STRATEGY 2: Sliding window approach
+    SPLIT both texts into words
+    window_size = number of words in target
+    
+    FOR each possible window in source (same size as target):
+      EXTRACT window of words
+      CALCULATE similarity score using token_sort_ratio (Levenshtein distance)
+      IF score >= threshold (85%):
+        RETURN true (found a match)
+  
+  STRATEGY 3: Partial ratio for short strings
+    IF target is short (<= 20 characters):
+      CALCULATE partial_ratio (checks if target is substring of source)
+      IF score >= threshold:
+        RETURN true
+  
+  RETURN false (no match found)
+  
+  WHY: OCR often makes mistakes (e.g., "warn1ng" instead of "warning"),
+       so we need fuzzy matching, not exact matching
+
+
+================================================================================
+4. LONG WARNING TEXT CHECKING (Lines 132-183)
+================================================================================
+
+FUNCTION check_long_warning_text(ocr_text, expected_text, key_phrases):
+  PURPOSE: Check if long warning text is present (pregnancy/machinery warnings)
+           Uses multiple strategies because OCR often misses words
+  
+  NORMALIZE both texts
+  
+  STRATEGY 1: Key phrase matching (most reliable)
+    IF key_phrases provided:
+      phrases_found = 0
+      FOR each key phrase (e.g., "pregnancy", "birth defects"):
+        IF phrase found in OCR text (using fuzzy matching, 75% threshold):
+          INCREMENT phrases_found
+      
+      IF phrases_found >= 60% of total key phrases:
+        RETURN true (found enough key phrases, probably a match)
+  
+  STRATEGY 2: Token sort ratio (handles word order changes)
+    CALCULATE token_sort_ratio (similarity ignoring word order)
+    IF score >= 70%:
+      RETURN true
+  
+  STRATEGY 3: Sliding window chunk matching
+    BREAK expected text into chunks of 8 words
+    chunks_matched = 0
+    
+    FOR each chunk:
+      IF chunk found in OCR text (fuzzy match, 75% threshold):
+        INCREMENT chunks_matched
+    
+    IF chunks_matched >= 50% of total chunks:
+      RETURN true (most chunks matched, probably correct)
+  
+  STRATEGY 4: Token overlap fallback (more lenient)
+    CALCULATE Jaccard similarity:
+      shared_words = words in both texts
+      total_unique_words = all words from both texts
+      overlap = shared_words / total_unique_words
+    
+    IF overlap >= 50% (was 65%, too strict):
+      RETURN true
+  
+  RETURN false (no match found)
+  
+  WHY: Long warning text often has OCR errors, so we need multiple fallback
+       strategies to catch it even if some words are missing or wrong
+
+
+================================================================================
+5. GOVERNMENT WARNING VALIDATION (Lines 185-235)
+================================================================================
+
+FUNCTION check_government_warning(ocr_text):
+  PURPOSE: Validate that label has all required government warning text
+  
+  NORMALIZE text
+  original_text = lowercase version (keep for fuzzy matching)
+  
+  CHECK 1: "GOVERNMENT WARNING" header
+    has_warning_label = false
+    TRY fuzzy matching with variations:
+      - "government warning"
+      - "government warn ing" (OCR might split it)
+      - "govern ment warning"
+    
+    IF not found:
+      TRY regex pattern: "government\s*warn[il1]ng"
+        (handles OCR errors like "warn1ng" or "warnilng")
+    
+    IF found:
+      has_warning_label = true
+  
+  CHECK 2: "SURGEON GENERAL"
+    has_surgeon_general = false
+    TRY fuzzy matching with variations:
+      - "surgeon general"
+      - "surgeon gen eral" (OCR might split it)
+    
+    IF not found:
+      TRY regex pattern: "surgeon\s*general"
+    
+    IF found:
+      has_surgeon_general = true
+  
+  CHECK 3: Pregnancy warning (long text)
+    EXPECTED TEXT: "according to the surgeon general women should not drink 
+                    alcoholic beverages during pregnancy because of the risk 
+                    of birth defects"
+    
+    KEY PHRASES: ["pregnancy", "birth defects", "women should not drink", 
+                  "surgeon general"]
+    
+    has_pregnancy_warning = check_long_warning_text(
+      ocr_text, 
+      expected_text, 
+      key_phrases
+    )
+  
+  CHECK 4: Machinery/Driving warning (long text)
+    EXPECTED TEXT: "consumption of alcoholic beverages impairs your ability 
+                    to drive a car or operate machinery and may cause health 
+                    problems"
+    
+    KEY PHRASES: ["drive a car", "operate machinery", "impairs your ability", 
+                  "alcoholic beverages"]
+    
+    has_driving_warning = check_long_warning_text(
+      ocr_text, 
+      expected_text, 
+      key_phrases
+    )
+  
+  CALCULATE overall compliance:
+    is_compliant = has_warning_label 
+                   AND has_surgeon_general 
+                   AND has_pregnancy_warning 
+                   AND has_driving_warning
+  
+  RETURN {
+    compliant: is_compliant,
+    details: {
+      has_warning_label: true/false,
+      has_surgeon_general: true/false,
+      has_pregnancy_warning: true/false,
+      has_driving_warning: true/false
+    }
+  }
+
+
+================================================================================
+6. FIELD EXTRACTION (Lines 237-333)
+================================================================================
+
+FUNCTION extract_brand_name(ocr_text):
+  PURPOSE: Get brand name from first few words of OCR text
+  
+  SPLIT text into words
+  IF at least 2 words:
+    TAKE first 0-5 words
+    JOIN them back together
+    RETURN brand name
+  ELSE:
+    RETURN None
+  
+  NOTE: OCR might miss cursive text, so we take what we can get
+
+FUNCTION extract_product_class(ocr_text, brand_name):
+  PURPOSE: Find product type (whiskey, wine, etc.) after brand name
+  
+  DEFINE product keywords:
+    ["whiskey", "bourbon", "wine", "rum", "beer", "ale", etc.]
+  
+  NORMALIZE text
+  SKIP past brand name position (if brand_name provided)
+  
+  SEARCH for product keywords:
+    FOR each keyword:
+      IF keyword found in text (after brand):
+        EXTRACT 0-4 words around keyword
+        RETURN product class
+  
+  IF no keyword found:
+    RETURN first few words after brand (might be cursive OCR missed)
+
+FUNCTION extract_alcohol_content(ocr_text):
+  PURPOSE: Find alcohol percentage (e.g., "45%", "40% ABV")
+  
+  DEFINE patterns:
+    - "45%" or "45 %"
+    - "45 percent"
+    - "45 alc/vol" or "45 alc / vol"
+    - "45 abv"
+  
+  FOR each pattern:
+    SEARCH in OCR text (case insensitive)
+    IF match found:
+      EXTRACT number and % sign with surrounding context
+      RETURN alcohol content
+  
+  RETURN None
+
+FUNCTION extract_net_contents(ocr_text):
+  PURPOSE: Find volume (e.g., "750ml", "1L", "12 fl oz")
+  
+  DEFINE volume patterns:
+    - "750 ml" or "750ml"
+    - "1 L" or "1L"
+    - "12 fl oz" or "12 fluid ounce"
+    - "1 pint" or "1 pt"
+  
+  FOR each pattern:
+    SEARCH in OCR text (case insensitive)
+    IF match found:
+      EXTRACT number and unit with surrounding context
+      RETURN net contents
+  
+  RETURN None
+
+
+================================================================================
+7. IMAGE PREPROCESSING (Lines 374-603)
+================================================================================
+
+FUNCTION preprocess_image_for_ocr(image):
+  PURPOSE: Enhance image to improve OCR accuracy (standard PIL method)
+  
+  CONVERT to RGB if needed (handles RGBA, P, etc.)
+  CONVERT to grayscale (OCR works better on grayscale)
+  CONVERT to OpenCV format (numpy array)
+  
+  APPLY CLAHE (Contrast Limited Adaptive Histogram Equalization):
+    - Improves contrast, especially for low-contrast images
+    - clipLimit=4.0 (higher for gold on black text)
+  
+  ENHANCE contrast (3x multiplier)
+  ENHANCE brightness (1.3x multiplier)
+  ENHANCE sharpness (4x multiplier)
+  APPLY unsharp mask (edge enhancement)
+  
+  BINARIZE (convert to pure black and white):
+    TRY Otsu's method (automatic threshold detection):
+      - Normal version (dark text on light background)
+      - Inverted version (light text on dark background)
+    
+    CHOOSE version with more text content (more white pixels)
+  
+  IF binarization fails:
+    FALLBACK to simple threshold (128)
+  
+  REMOVE noise with median filter
+  RETURN processed image
+
+FUNCTION preprocess_image_variant_1(image):
+  PURPOSE: Advanced OpenCV preprocessing for low-contrast images
+  
+  CONVERT to OpenCV format
+  APPLY bilateral filter (noise reduction, preserves edges)
+  DESKEW image (straighten rotated text)
+  APPLY CLAHE (contrast enhancement)
+  ENHANCE edges using unsharp masking
+  
+  TRY 4 different thresholding methods:
+    1. Adaptive threshold (normal)
+    2. Adaptive threshold (inverted)
+    3. Otsu threshold (normal)
+    4. Otsu threshold (inverted)
+  
+  SCORE each method:
+    - Count white pixels (text content)
+    - Calculate text density ratio
+    - Prefer ~30% text density
+  
+  CHOOSE best method based on score
+  
+  APPLY morphological operations:
+    - Close small gaps in characters
+    - Remove small noise
+  APPLY median blur (final noise reduction)
+  
+  RETURN processed image
+
+FUNCTION preprocess_image_variant_2(image):
+  PURPOSE: Advanced OpenCV preprocessing for clear, high-contrast images
+  
+  CONVERT to OpenCV format
+  APPLY fastNlMeansDenoising (advanced denoising, preserves edges)
+  DESKEW image
+  APPLY CLAHE (contrast enhancement)
+  SHARPEN using unsharp mask
+  APPLY Otsu thresholding (automatic threshold)
+  TRY both normal and inverted, choose better one
+  APPLY morphological cleanup
+  RETURN processed image
+
+FUNCTION deskew_image(image):
+  PURPOSE: Straighten rotated/scanned text
+  
+  DETECT edges using Canny edge detection
+  USE Hough transform to detect text lines
+  CALCULATE average angle of text lines
+  IF angle is significant (> 0.5 degrees):
+    ROTATE image to correct angle
+  RETURN deskewed image
+
+
+================================================================================
+8. OCR WITH RETRY (Lines 605-740)
+================================================================================
+
+FUNCTION perform_ocr_with_retry(image):
+  PURPOSE: Run OCR with multiple preprocessing strategies and PSM modes
+           Returns the best result
+  
+  CREATE empty results list
+  
+  DEFINE scoring function:
+    PURPOSE: Rate OCR result quality
+    COUNT alphanumeric characters (real text)
+    COUNT words (more words = better)
+    CALCULATE special character ratio
+    IF special chars > 30%:
+      PENALIZE score (too many special chars = bad OCR)
+    RETURN quality score
+  
+  DEFINE preprocessing variants (in order of preference):
+    1. Variant 2 (OpenCV Enhanced Otsu) - best for most images
+    2. Variant 3 (Standard PIL) - good fallback
+    3. Variant 1 (OpenCV Adaptive) - only if needed
+  
+  DEFINE PSM modes (Page Segmentation Modes):
+    0 = Orientation and script detection only
+    1 = Automatic page segmentation with OSD
+    3 = Fully automatic page segmentation, no OSD
+  
+  TRY Variant 2 and Variant 3 first:
+    FOR each variant:
+      PREPROCESS image
+      FOR each PSM mode:
+        RUN Tesseract OCR with PSM mode
+        CLEAN UP text (remove extra spaces, newlines)
+        
+        IF text is valid (length > 5):
+          ADD to results list
+          CALCULATE quality score
+          
+          IF high quality (long enough, enough words, good score):
+            RETURN immediately (early exit - saves time)
+  
+  IF high quality result not found:
+    TRY Variant 1 (more expensive, only if needed):
+      PREPROCESS image
+      FOR each PSM mode:
+        RUN Tesseract OCR
+        CLEAN UP text
+        ADD to results
+        
+        IF high quality:
+          RETURN immediately
+  
+  IF no results at all:
+    FALLBACK to basic OCR (simple preprocessing)
+    RETURN result
+  
+  PICK best result from all_results based on quality score
+  RETURN best OCR text
+  
+  WHY: Different images need different preprocessing. Trying multiple
+       strategies ensures we get the best OCR result possible.
+
+
+================================================================================
+9. MAIN API ENDPOINT - /api/verify (Lines 771-837)
+================================================================================
+
+ENDPOINT POST /api/verify:
+  PURPOSE: Main verification endpoint - checks label compliance
+  
+  RECEIVE form data:
+    - brand_name (required)
+    - product_type (required)
+    - alcohol_content (required)
+    - net_contents (optional)
+    - image file (required)
+  
+  TRY:
+    STEP 1: Read and process image
+      READ image file from upload
+      OPEN image with PIL
+      LOG image dimensions and mode
+    
+    STEP 2: Run OCR
+      CALL perform_ocr_with_retry(image)
+      GET ocr_text (extracted text from image)
+    
+    STEP 3: Clean form inputs
+      TRIM whitespace from all form fields
+      HANDLE empty/None values
+    
+    STEP 4: Match fields using fuzzy matching
+      brand_match = fuzzy_match(ocr_text, brand_name, 85% threshold)
+        IF brand_name provided AND found in OCR: true, else false
+      
+      type_match = fuzzy_match(ocr_text, product_type, 85% threshold)
+        IF product_type provided AND found in OCR: true, else false
+      
+      alc_match = validate_alcohol_content(ocr_text, alcohol_content, product_type)
+        - Extract number from form value
+        - Search for number in OCR text
+        - Handle special cases (e.g., "table wine" for wine with no ABV)
+      
+      net_match = fuzzy_match(ocr_text, net_contents, 85% threshold)
+        IF net_contents provided AND found in OCR: true, else true (optional field)
+    
+    STEP 5: Check government warning compliance
+      CALL check_government_warning(ocr_text)
+      GET compliance result with details for each check
+    
+    STEP 6: Generate text highlights for UI
+      highlights = []
+      IF brand_match:
+        FIND coordinates of brand name in image
+        ADD to highlights
+      IF alc_match:
+        FIND coordinates of alcohol content in image
+        ADD to highlights
+    
+    STEP 7: Calculate overall success
+      success = brand_match 
+                AND type_match 
+                AND alc_match 
+                AND net_match 
+                AND compliance["compliant"]
+    
+    STEP 8: Return response
+      RETURN JSON with:
+        - success: true/false
+        - ocr_text_snippet: first 500 chars of OCR text
+        - results: {
+            brand_name: {match: true/false, value: "..."},
+            product_type: {match: true/false, value: "..."},
+            alcohol_content: {match: true/false, value: "..."},
+            net_contents: {match: true/false, value: "..."},
+            compliance: {
+              compliant: true/false,
+              details: {
+                has_warning_label: true/false,
+                has_surgeon_general: true/false,
+                has_pregnancy_warning: true/false,
+                has_driving_warning: true/false
+              }
+            }
+          }
+        - highlights: [{x, y, w, h, text}, ...] (for UI overlay)
+        - image_dimensions: {width, height}
+  
+  CATCH errors:
+    LOG error with full traceback
+    RETURN HTTP 500 error with message
+
+
+================================================================================
+10. STATIC FILE SERVING (Lines 839-873)
+================================================================================
+
+FUNCTION get_index_html():
+  PURPOSE: Serve the React frontend app (for production)
+  
+  CHECK if dist/index.html exists
+  IF exists:
+    RETURN FileResponse with index.html
+  ELSE:
+    RETURN JSON error:
+      - "Frontend not built"
+      - "Run 'npm run build' first"
+      - Debug info (current dir, dist exists, etc.)
+
+ENDPOINT GET /:
+  RETURN index.html (React app root)
+
+ENDPOINT GET /{any_path}:
+  PURPOSE: Handle React Router routes (SPA routing)
+  
+  IF path starts with "api" or "assets":
+    RETURN 404 (these are handled by other routes)
+  ELSE:
+    RETURN index.html (let React Router handle the route)
+
+
+================================================================================
+11. SERVER STARTUP (Lines 875-878)
+================================================================================
+
+IF running as main script (not imported):
+  IMPORT uvicorn
+  START FastAPI server:
+    - Host: 0.0.0.0 (all interfaces)
+    - Port: 8000
+    - App: our FastAPI app instance
+
+
+================================================================================
+FLOW SUMMARY
+================================================================================
+
+1. USER ACTION:
+   User uploads label image + fills form → POST /api/verify
+
+2. IMAGE PROCESSING:
+   Image → Multiple preprocessing variants → Best preprocessed image
+
+3. OCR EXECUTION:
+   Preprocessed image → Tesseract OCR (multiple PSM modes) → Best OCR text
+
+4. TEXT MATCHING:
+   OCR text + Form data → Fuzzy matching → Match results
+
+5. COMPLIANCE CHECK:
+   OCR text → Government warning validation → Compliance status
+
+6. RESPONSE:
+   All results → JSON response → Frontend displays results
+
+KEY DESIGN DECISIONS:
+- Multiple preprocessing strategies (handles different image types)
+- Fuzzy matching (handles OCR errors)
+- Multi-strategy warning text checking (handles missing words)
+- Early exit optimization (saves time if good result found)
+- Fallback mechanisms (ensures we always get a result)
+
+
+================================================================================
+END OF PSEUDOCODE
+================================================================================
+

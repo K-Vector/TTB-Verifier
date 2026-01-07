@@ -2,6 +2,8 @@
 
 A web application for verifying alcohol label compliance with TTB regulations using OCR technology. Upload a label image, enter product information, and get instant verification results.
 
+https://ttb-verifier.onrender.com
+
 ## Features
 
 - **Clean, minimalist UI** - Simple two-panel layout for easy verification
