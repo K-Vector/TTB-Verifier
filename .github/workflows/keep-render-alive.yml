@@ -2,8 +2,8 @@ name: Keep Render Service Alive
 
 on:
   schedule:
-    # Runs every 5 minutes to prevent Render free tier sleep
-    - cron: '*/5 * * * *'
+    # Runs every 10 minutes to prevent Render free tier sleep
+    - cron: '*/10 * * * *'
   workflow_dispatch:
 
 jobs:
