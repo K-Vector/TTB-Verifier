@@ -1,0 +1,25 @@
+name: Keep Render Service Alive
+
+on:
+  schedule:
+    # Runs every 5 minutes to prevent Render free tier sleep
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ping TTB Verifier
+        run: |
+          echo "Pinging TTB Verifier at $(date)"
+
+          curl -s -o /dev/null -w "HTTP Status: %{http_code}\n" \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+            -H "Accept: text/html,application/xhtml+xml" \
+            --connect-timeout 30 \
+            --max-time 60 \
+            https://ttb-verifier.onrender.com
+
+          echo "Ping completed at $(date)"
