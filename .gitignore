@@ -46,3 +46,6 @@ Thumbs.db
 .env.local
 .env.*.local
 
+
+# local venvs (catch .venv311 and similar)
+.venv*/
